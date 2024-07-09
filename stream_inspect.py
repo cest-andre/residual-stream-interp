@@ -72,16 +72,14 @@ def get_activations(extractor, x, module_name, neuron_coord=None, channel_id=Non
 
     x = torch.unsqueeze(x, 0)
 
-    features = extractor.extract_features(
+    activations = extractor.extract_features(
         batches=x,
         module_name=module_name,
         flatten_acts=False
     )
 
     if use_center:
-        neuron_coord = features.shape[-1] // 2
-
-    activations = features
+        neuron_coord = activations.shape[-1] // 2
 
     if neuron_coord is not None:
         activations = activations[:, :, neuron_coord, neuron_coord]
@@ -367,11 +365,11 @@ if __name__ == "__main__":
             scale_mid_measures = torch.tensor(scale_mid_measures)
             scale_in_measures = torch.tensor(scale_in_measures)
 
-            factor = 100
+            factor = 1.5
             scale_mid_copy = torch.clone(scale_mid_measures)
             scale_in_copy = torch.clone(scale_in_measures)
-            scale_mid_copy[torch.nonzero(torch.logical_or(scale_mid_copy <= 0, torch.logical_or(mixes <= (1/factor), mixes >= factor)))] = -1e5
-            scale_in_copy[torch.nonzero(torch.logical_or(scale_in_copy <= 0, torch.logical_or(mixes <= (1/factor), mixes >= factor)))] = -1e5
+            scale_mid_copy[torch.nonzero(torch.logical_or(scale_mid_copy <= 0, torch.logical_or(mixes <= (1/factor), mixes >= factor)))] = -1e10
+            scale_in_copy[torch.nonzero(torch.logical_or(scale_in_copy <= 0, torch.logical_or(mixes <= (1/factor), mixes >= factor)))] = -1e10
             scale_top_cross_delta = scale_mid_copy + scale_in_copy
             top_scales, top_scale_channels = torch.topk(scale_top_cross_delta, torch.nonzero((scale_mid_copy + scale_in_copy) > 0).shape[0])
             scale_percs.append(top_scales.shape[0] / block['num_neurons'])
@@ -379,8 +377,8 @@ if __name__ == "__main__":
             #   No mix criterion.
             scale_mid_copy = torch.clone(scale_mid_measures)
             scale_in_copy = torch.clone(scale_in_measures)
-            scale_mid_copy[torch.nonzero(scale_mid_copy <= 0)] = -1e5
-            scale_in_copy[torch.nonzero(scale_in_copy <= 0)] = -1e5
+            scale_mid_copy[torch.nonzero(scale_mid_copy <= 0)] = -1e10
+            scale_in_copy[torch.nonzero(scale_in_copy <= 0)] = -1e10
             scale_top_cross_delta = scale_mid_copy + scale_in_copy
             no_mix_top_scales, no_mix_top_scale_channels = torch.topk(scale_top_cross_delta, torch.nonzero((scale_mid_copy + scale_in_copy) > 0).shape[0])
             no_mix_percs.append(no_mix_top_scales.shape[0] / block['num_neurons'])
