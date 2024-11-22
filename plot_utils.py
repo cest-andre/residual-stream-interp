@@ -4,6 +4,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+import matplotlib.pyplot as plt
+import numpy as np
+
 
 def plot_mix_histos(figs, fig_titles, plotdir):
     fig = make_subplots(rows=2, cols=4, subplot_titles=fig_titles, horizontal_spacing=0.05, vertical_spacing=0.1)
@@ -124,3 +127,52 @@ def plot_scale_percs(scale_percs, no_mix_percs, plotdir):
     fig.update_yaxes(title_text=r"% of Channels Scale Invariant", tick0=0, dtick=5)
     fig.update_layout(margin={"b": 10, "l": 15, "r": 10, "t": 10})
     fig.write_image(f"{plotdir}/scale_invariance_percs.png", scale=2)
+
+
+#   TODO:  Plot raw accs in one plot, plot scale abl acc / rand abl acc ratio in other plot.
+#          Maybe plot both blocks in one.
+def plot_scale_robust_accs(layer):
+    if layer == 'layer2.1':
+        no_scale_scale = 67.576
+        up_scale_scale = [65.808, 64.286, 61.716, 57.74, 51.286]
+    elif layer == 'layer3.1':
+        no_scale_scale = 68.63
+        up_scale_scale = [67.374, 65.74, 63.178, 59.272, 52.934]
+
+    no_scales = np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/no_scale_rand_mean_all_trials.npy')
+    no_scale_rand = no_scale_scale / np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/no_scale_rand_mean_all_trials.npy')
+    no_scale_rand = np.mean(no_scale_rand)
+
+    up_scale_rand = np.array([up_scale_scale / np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/up_rand_mean_trial_{i}.npy') for i in range(10)])
+    up_scale_rand = np.mean(up_scale_rand, axis=0)
+
+    labels = ('No Scale',)
+    accs = {'Ratio': (no_scale_rand,)}
+    for i in range(5):
+        labels += (f'{(i+1)*10}%',)
+        accs['Ratio'] += (up_scale_rand[i],)
+
+    x = np.arange(len(labels))
+    width = 0.25
+    mult = 0
+    fig, ax = plt.subplots(layout='constrained')
+    for attr, mean in accs.items():
+        # offset = width * mult
+        rects = ax.bar(x, mean, width)#, label=attr)
+        # ax.bar_label(rects, padding=3)
+        mult += 1
+
+    ax.set_xlabel('Percent Scaled')
+    ax.set_ylabel('Scale / Rand Ablate Imnet Val Top 1')
+    ax.set_title(f'Ablate Effects of Scale Inv vs Rand Channels on Scale Robustness\n{layer}')
+    ax.set_xticks(x, labels)
+    ax.axhline(y=no_scale_rand, color='b')
+    if layer == 'layer2.1':
+        ax.set_ylim([0.9, 1.1])
+    elif layer == 'layer3.1':
+        ax.set_ylim([0.99, 1.01])
+    plt.show()
+
+
+if __name__ == '__main__':
+    plot_scale_robust_accs('layer3.1')

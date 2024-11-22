@@ -42,29 +42,26 @@ def exemplar_grid(fzdir, modelname, in_layer, mid_layer, out_layer, neuron, save
     img = read_image(os.path.join(fzdir, modelname, out_layer, f"unit{neuron}", "0_distill_center.png"))
     imgs.append(img)
 
-    # img = read_image(os.path.join(fzdir, modelname, in_layer, f"unit{neuron}", "0_distill_channel.png"))
-    # imgs.append(img)
-    # img = read_image(os.path.join(fzdir, modelname, mid_layer, f"unit{neuron}", "0_distill_channel.png"))
-    # imgs.append(img)
-    # img = read_image(os.path.join(fzdir, modelname, out_layer, f"unit{neuron}", "0_distill_channel.png"))
-    # imgs.append(img)
+    img = read_image(os.path.join(fzdir, modelname, in_layer, f"unit{neuron}", "0_distill_channel.png"))
+    imgs.append(img)
+    img = read_image(os.path.join(fzdir, modelname, mid_layer, f"unit{neuron}", "0_distill_channel.png"))
+    imgs.append(img)
+    img = read_image(os.path.join(fzdir, modelname, out_layer, f"unit{neuron}", "0_distill_channel.png"))
+    imgs.append(img)
 
     if val_dir is not None:
-        img_path = os.path.join(val_dir, modelname, in_layer, f"{in_layer}_neuron{neuron}")
-        val_imgs = [read_image(os.path.join(img_path, file)) for file in os.listdir(img_path) if ".png" in file]
-        val_imgs = make_grid(val_imgs, nrow=3)
+        img_path = os.path.join(val_dir, modelname, in_layer, 'all_grids', f"{in_layer}_neuron{neuron}.png")
+        val_imgs = read_image(img_path)
         val_imgs = Resize(224)(val_imgs)
         imgs.append(val_imgs)
 
-        img_path = os.path.join(val_dir, modelname, mid_layer, f"{mid_layer}_neuron{neuron}")
-        val_imgs = [read_image(os.path.join(img_path, file)) for file in os.listdir(img_path) if ".png" in file]
-        val_imgs = make_grid(val_imgs, nrow=3)
+        img_path = os.path.join(val_dir, modelname, mid_layer, 'all_grids', f"{mid_layer}_neuron{neuron}.png")
+        val_imgs = read_image(img_path)
         val_imgs = Resize(224)(val_imgs)
         imgs.append(val_imgs)
 
-        img_path = os.path.join(val_dir, modelname, out_layer, f"{out_layer}_neuron{neuron}")
-        val_imgs = [read_image(os.path.join(img_path, file)) for file in os.listdir(img_path) if ".png" in file]
-        val_imgs = make_grid(val_imgs, nrow=3)
+        img_path = os.path.join(val_dir, modelname, out_layer, 'all_grids', f"{out_layer}_neuron{neuron}.png")
+        val_imgs = read_image(img_path)
         val_imgs = Resize(224)(val_imgs)
         imgs.append(val_imgs)
 

@@ -21,48 +21,48 @@ norm_trans = transforms.Compose([
 ])
 
 block_list = [
+    # {
+    #     'output_module': 'layer1.1',
+    #     'input_module': 'layer1.0',
+    #     'middle_module': 'layer1.1.bn2',
+    #     'num_neurons': 64
+    # },
+    # {
+    #     'output_module': 'layer2.0',
+    #     'input_module': 'layer2.0.downsample.1',
+    #     'middle_module': 'layer2.0.bn2',
+    #     'num_neurons': 128
+    # },
+    # {
+    #     'output_module': 'layer2.1.prerelu_out',
+    #     'input_module': 'layer2.0.prerelu_out',
+    #     'middle_module': 'layer2.1.bn2',
+    #     'num_neurons': 128
+    # },
+    # {
+    #     'output_module': 'layer3.0',
+    #     'input_module': 'layer3.0.downsample.1',
+    #     'middle_module': 'layer3.0.bn2',
+    #     'num_neurons': 256
+    # },
     {
-        'output_module': 'layer1.1',
-        'input_module': 'layer1.0',
-        'middle_module': 'layer1.1.bn2',
-        'num_neurons': 64
-    },
-    {
-        'output_module': 'layer2.0',
-        'input_module': 'layer2.0.downsample.1',
-        'middle_module': 'layer2.0.bn2',
-        'num_neurons': 128
-    },
-    {
-        'output_module': 'layer2.1',
-        'input_module': 'layer2.0',
-        'middle_module': 'layer2.1.bn2',
-        'num_neurons': 128
-    },
-    {
-        'output_module': 'layer3.0',
-        'input_module': 'layer3.0.downsample.1',
-        'middle_module': 'layer3.0.bn2',
-        'num_neurons': 256
-    },
-    {
-        'output_module': 'layer3.1',
-        'input_module': 'layer3.0',
+        'output_module': 'layer3.1.prerelu_out',
+        'input_module': 'layer3.0.prerelu_out',
         'middle_module': 'layer3.1.bn2',
         'num_neurons': 256
     },
-    {
-        'output_module': 'layer4.0',
-        'input_module': 'layer4.0.downsample.1',
-        'middle_module': 'layer4.0.bn2',
-        'num_neurons': 512
-    },
-    {
-        'output_module': 'layer4.1',
-        'input_module': 'layer4.0',
-        'middle_module': 'layer4.1.bn2',
-        'num_neurons': 512
-    }
+    # {
+    #     'output_module': 'layer4.0',
+    #     'input_module': 'layer4.0.downsample.1',
+    #     'middle_module': 'layer4.0.bn2',
+    #     'num_neurons': 512
+    # },
+    # {
+    #     'output_module': 'layer4.1',
+    #     'input_module': 'layer4.0',
+    #     'middle_module': 'layer4.1.bn2',
+    #     'num_neurons': 512
+    # }
 ]
 
 
@@ -93,7 +93,7 @@ def get_activations(extractor, x, module_name, neuron_coord=None, channel_id=Non
 def measure_invariance(extractor, fzdir, curvedir, model_name, output_module, input_module, middle_module, neuron, variant="scale", imnet_val=False, show_results=False):
     top_img = None
     if imnet_val:
-        img_path = os.path.join(curvedir, model_name, input_module, f"{input_module}_neuron{neuron}")
+        img_path = os.path.join(curvedir, model_name, input_module, "intact", f"{input_module}_neuron{neuron}", "max", "exc")
         top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file]
         top_img = torch.stack(top_img)
     else:
@@ -115,7 +115,7 @@ def measure_invariance(extractor, fzdir, curvedir, model_name, output_module, in
     mid_act_delta = np.mean(np.clip(mid_variant_act, 0, None)) - np.mean(np.clip(mid_base_act, 0, None))
 
     if imnet_val:
-        img_path = os.path.join(curvedir, model_name, middle_module, f"{middle_module}_neuron{neuron}")
+        img_path = os.path.join(curvedir, model_name, middle_module, "intact", f"{middle_module}_neuron{neuron}", "max", "exc")
         top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file]
         top_img = torch.stack(top_img)
     else:
@@ -144,7 +144,7 @@ def measure_invariance(extractor, fzdir, curvedir, model_name, output_module, in
 def stream_inspect(extractor, fzdir, curvedir, model_name, output_module, input_module, middle_module, neuron, imnet_val=False, show_results=False):
     top_img = None
     if imnet_val:
-        img_path = os.path.join(curvedir, model_name, output_module, f"{output_module}_neuron{neuron}")
+        img_path = os.path.join(curvedir, model_name, output_module, "intact", f"{output_module}_neuron{neuron}", "max", "exc")
         top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file]
         top_img = torch.stack(top_img)
     else:
@@ -156,7 +156,7 @@ def stream_inspect(extractor, fzdir, curvedir, model_name, output_module, input_
     out_mid_acts = get_activations(extractor, top_img, middle_module, channel_id=neuron, use_center=True)
 
     if imnet_val:
-        img_path = os.path.join(curvedir, model_name, input_module, f"{input_module}_neuron{neuron}")
+        img_path = os.path.join(curvedir, model_name, input_module, "intact", f"{input_module}_neuron{neuron}", "max", "exc")
         top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file]
         top_img = torch.stack(top_img)
     else:
@@ -168,7 +168,7 @@ def stream_inspect(extractor, fzdir, curvedir, model_name, output_module, input_
     in_mid_acts = get_activations(extractor, top_img, middle_module, channel_id=neuron, use_center=True)
 
     if imnet_val:
-        img_path = os.path.join(curvedir, model_name, middle_module, f"{middle_module}_neuron{neuron}")
+        img_path = os.path.join(curvedir, model_name, middle_module, "intact", f"{middle_module}_neuron{neuron}", "max", "exc")
         top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file]
         top_img = torch.stack(top_img)
     else:
@@ -384,8 +384,8 @@ if __name__ == "__main__":
             no_mix_percs.append(no_mix_top_scales.shape[0] / block['num_neurons'])
 
             #   Extract top 3 channels for visualization.
-            if top_scales.shape[0] > 3:
-                top_scale_channels = top_scale_channels[torch.topk(top_scales, 3)[1]]
+            # if top_scales.shape[0] > 3:
+                # top_scale_channels = top_scale_channels[torch.topk(top_scales, 3)[1]]
 
             scale_mixes.append({f"scale mix {block['output_module']}": mixes[top_scale_channels]})
             in_deltas.append({f"in deltas {block['output_module']}": scale_in_measures[top_scale_channels]})
@@ -403,4 +403,4 @@ if __name__ == "__main__":
         print(scale_mixes)
         print(in_deltas)
         print(mid_deltas)
-        plot_scale_percs(torch.tensor(scale_percs), torch.tensor(no_mix_percs), plotdir)
+        # plot_scale_percs(torch.tensor(scale_percs), torch.tensor(no_mix_percs), plotdir)

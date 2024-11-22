@@ -6,13 +6,13 @@ import torch
 import torchvision
 from torchvision import models, transforms, utils
 import numpy as np
-from thingsvision import get_extractor
+from thingsvision import get_extractor, get_extractor_from_model
 
 from imnet_val import get_imnet_val_acts
 from stream_inspect import get_activations
 
 
-def saveTopN(imgs, lista, neuron_id, n=9, path=""):
+def saveTopN(imgs, lista, neuron_id, n=9, path="", save_inh=False):
     topil = transforms.ToPILImage()
     
     neuron_path = os.path.join(path, neuron_id)
@@ -32,6 +32,21 @@ def saveTopN(imgs, lista, neuron_id, n=9, path=""):
     grid = torchvision.transforms.ToPILImage()(grid)
     grid.save(os.path.join(grids_path, f"{neuron_id}.png"))
 
+    if save_inh:
+        inh_grids_path = os.path.join(path, "inh_grids")
+        Path(inh_grids_path).mkdir(exist_ok=True)
+
+        inh_imgs = []
+        for i in range(n):
+            img = imgs[int(lista[-(i+1)])]
+            inh_imgs.append(img)
+            img = topil(img)
+            img.save(os.path.join(neuron_path, f"{i}_bottom.png"))
+
+        grid = utils.make_grid(inh_imgs, nrow=3)
+        grid = torchvision.transforms.ToPILImage()(grid)
+        grid.save(os.path.join(inh_grids_path, f"{neuron_id}.png"))
+
 
 def compare_tuning_curves(extractor, module_name, savedir, valdir):
 
@@ -47,7 +62,7 @@ def compare_tuning_curves(extractor, module_name, savedir, valdir):
             all_ord_list = np.arange(len(all_images)).tolist()
             all_act_list, all_ord_sorted = zip(*sorted(zip(unrolled_act, all_ord_list), reverse=True))
 
-            saveTopN(all_images, all_ord_sorted, f"{module_name}_neuron{i}", path=savedir)
+            saveTopN(all_images, all_ord_sorted, f"{module_name}_neuron{i}", path=savedir, save_inh=True)
 
             np.save(os.path.join(savedir, f"{module_name}_unit{i}_unrolled_act.npy"),
                     np.array(unrolled_act))
@@ -68,11 +83,18 @@ if __name__ == '__main__':
     savedir = os.path.join(args.savedir, args.network, args.layer)
     Path(savedir).mkdir(parents=True, exist_ok=True)
 
-    extractor = get_extractor(
-        model_name=args.network,
-        source='torchvision',
-        device="cuda" if torch.cuda.is_available() else "cpu",
-        pretrained=True
+    model = models.resnet18(True, lesion=False).cuda()
+    extractor = get_extractor_from_model(
+        model=model,
+        device='cuda',
+        backend='pt'
     )
+    
+    # extractor = get_extractor(
+    #     model_name=args.network,
+    #     source='torchvision',
+    #     device="cuda" if torch.cuda.is_available() else "cpu",
+    #     pretrained=True
+    # )
 
     compare_tuning_curves(extractor, args.layer, savedir, args.imnet_val_dir)
