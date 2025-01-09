@@ -18,13 +18,14 @@ if __name__ == "__main__":
     parser.add_argument('--expansion', type=int, default=32)
     args = parser.parse_args()
 
-    acts_ds = [np.load(os.path.join(args.acts_dir, path)) for path in os.listdir(args.acts_dir)]
+    print(os.listdir(args.acts_dir)[:3])
+    acts_ds = [np.load(os.path.join(args.acts_dir, path)) for path in os.listdir(args.acts_dir)[:3]]
     input_dims = acts_ds[0].shape[-1]
-    num_blocks = 1
+    num_blocks = 2
     # acts_ds = np.concatenate(acts_ds, axis=1)
-    # acts_ds = np.concatenate((acts_ds[0], acts_ds[2], acts_ds[4]), axis=1)
-    acts_ds = acts_ds[0]  #  SAE
-    acts_ds = np.clip(acts_ds, a_min=0, a_max=None)
+    acts_ds = np.concatenate((acts_ds[0], acts_ds[1], acts_ds[2]), axis=1)
+    # acts_ds = acts_ds[0]  #  SAE
+    # acts_ds = np.clip(acts_ds, a_min=0, a_max=None)
 
     device = "cuda:1" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(0)
@@ -45,7 +46,7 @@ if __name__ == "__main__":
     lr=0.0004
     adam_beta1=0.9 
     adam_beta2=0.999
-    l1_coefficient = 8e-5
+    l1_coefficient = 3e-7
     lp_norm = 1
 
     optimizer = optim.Adam(
@@ -94,7 +95,7 @@ if __name__ == "__main__":
 
             features, acts_hat = gcc(acts[:, :input_dims])
 
-            mse_loss = torch.nn.functional.mse_loss(acts_hat, acts, reduction="none").sum(-1)
+            mse_loss = torch.nn.functional.mse_loss(acts_hat, acts[:, input_dims:], reduction="none").sum(-1)
             total_mse += mse_loss.mean().cpu().detach().numpy()
 
             weighted_feature_acts = features * gcc.W_dec.norm(dim=1)
@@ -113,8 +114,8 @@ if __name__ == "__main__":
         # if (ep+1) % 10 == 0:
 
         all_mses.append(total_mse / i)
-        torch.save(gcc.state_dict(), f"{args.ckpt_dir}/{label}_8e-5L1_sae_weights_{ep+1}ep.pth")
+        torch.save(gcc.state_dict(), f"{args.ckpt_dir}/{label}_gtc_weights_{ep+1}ep.pth")
 
         #   TODO:  validate by running on imnet val.  Record just the total reconstruction loss (omit sparsity loss).  Compare jumprelu vs vanilla.
         
-    np.save(f"{args.ckpt_dir}/{label}_8e-5L1_sae_maes_{ep+1}.npy", np.array(all_mses))
+    np.save(f"{args.ckpt_dir}/{label}_gtc_maes_{ep+1}.npy", np.array(all_mses))

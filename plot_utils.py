@@ -1,5 +1,5 @@
 import torch
-from scipy.stats import spearmanr, f_oneway
+from scipy.stats import spearmanr, f_oneway, sem
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -141,26 +141,26 @@ def plot_scale_robust_accs(layer):
 
     no_scales = np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/no_scale_rand_mean_all_trials.npy')
     no_scale_rand = no_scale_scale / np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/no_scale_rand_mean_all_trials.npy')
+    no_scale_rand_err = sem(no_scale_rand)
     no_scale_rand = np.mean(no_scale_rand)
 
     up_scale_rand = np.array([up_scale_scale / np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/up_rand_mean_trial_{i}.npy') for i in range(10)])
+    up_scale_rand_err = sem(up_scale_rand, axis=0)
     up_scale_rand = np.mean(up_scale_rand, axis=0)
 
     labels = ('No Scale',)
-    accs = {'Ratio': (no_scale_rand,)}
+    accs = {'Ratio': (no_scale_rand,), 'Error': (no_scale_rand_err,)}
+    # errs = {}
     for i in range(5):
         labels += (f'{(i+1)*10}%',)
         accs['Ratio'] += (up_scale_rand[i],)
+        accs['Error'] += (up_scale_rand_err[i],)
 
     x = np.arange(len(labels))
     width = 0.25
     mult = 0
     fig, ax = plt.subplots(layout='constrained')
-    for attr, mean in accs.items():
-        # offset = width * mult
-        rects = ax.bar(x, mean, width)#, label=attr)
-        # ax.bar_label(rects, padding=3)
-        mult += 1
+    rects = ax.bar(x, accs['Ratio'], width, yerr=accs['Error'])
 
     ax.set_xlabel('Percent Scaled')
     ax.set_ylabel('Scale / Rand Ablate Imnet Val Top 1')
@@ -175,4 +175,4 @@ def plot_scale_robust_accs(layer):
 
 
 if __name__ == '__main__':
-    plot_scale_robust_accs('layer3.1')
+    plot_scale_robust_accs('layer2.1')

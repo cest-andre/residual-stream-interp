@@ -68,4 +68,4 @@ for i, data in enumerate(trainloader, 0):
 
     all_acts += acts.tolist()
 
-np.save(os.path.join(args.save_dir, f'scale{scale}.npy'), np.array(all_acts))
+np.save(os.path.join(args.save_dir, f'3.1.bn2_scale{scale}.npy'), np.array(all_acts))

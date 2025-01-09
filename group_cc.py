@@ -1,6 +1,7 @@
 from typing import Any
 import torch
 from torch import nn
+import numpy as np
 
 
 #   NOTE:  copied from
@@ -155,7 +156,14 @@ class ModelWrapper(nn.Module):
         self.model.append(resnet.layer1)
         self.model.append(resnet.layer2)
         self.model.append(resnet.layer3)
-        self.model.append(resnet.layer4)
+        # self.model.append(resnet.layer3[0])
+        # self.model.append(resnet.layer3[1].conv1)
+        # self.model.append(resnet.layer3[1].bn1)
+        # self.model.append(resnet.layer3[1].relu)
+        # self.model.append(resnet.layer3[1].conv2)
+        # self.model.append(resnet.layer3[1].bn2)
+
+        # self.model.append(resnet.layer4)
         # self.model.append(resnet.layer4[0])
         # self.model.append(resnet.layer4[1].conv1)
         # self.model.append(resnet.layer4[1].bn1)
@@ -165,7 +173,7 @@ class ModelWrapper(nn.Module):
 
         self.use_gcc = use_gcc
         if self.use_gcc:
-            self.map = nn.Linear(512, 512*expansion, bias=False)
+            self.map = nn.Linear(256, 256*expansion, bias=False)
 
     def forward(self, x):
         x = x.to(self.device)
@@ -184,22 +192,62 @@ class ModelWrapper(nn.Module):
 
 
 if __name__ == "__main__":
-    gcc_states = torch.load('/media/andrelongon/DATA/gcc_ckpts/scale1_1.2_1.4_1.6_1.8/vanilla_32exp_gcc_weights_10ep.pth')['W_dec']
-    w_dec = torch.reshape(gcc_states, (gcc_states.shape[0], 5, 256))
+    # #   GROUP CROSSCODERS
+    # gcc_states = torch.load('/media/andrelongon/DATA/gcc_ckpts/scale1_1.6/vanilla_32exp_gcc_weights_10ep.pth')['W_dec']
+    # w_dec = torch.reshape(gcc_states, (gcc_states.shape[0], 2, 256))
 
-    #   How to best measure similarity?  I'd like for magnitudes to also be the same which means avoiding normalizing.
-    #   Maybe could take euclid dist for now?  Also could measure variance in mags across the blocks and penalize for
-    #   larger variance (1/var ?).
+    # #   How to best measure similarity?  I'd like for magnitudes to also be the same which means avoiding normalizing.
+    # #   Maybe could take euclid dist for now?  Also could measure variance in mags across the blocks and penalize for
+    # #   larger variance (1/var ?).
+    # all_sims = []
+    # for latent in w_dec:
+    #     latent = torch.nn.functional.normalize(latent)
+
+    #     # all_sims.append(torch.dot(latent[0], latent[-1]))
+    #     sims = []
+    #     for i in range(latent.shape[0]):
+    #         for j in range(i+1, latent.shape[0]):
+    #             sims.append(torch.dot(latent[i], latent[j]))
+
+    #     all_sims.append(torch.tensor(sims).mean())
+
+    # print(torch.topk(torch.tensor(all_sims), 32, largest=True))
+    # print(torch.topk(torch.tensor(all_sims), 32, largest=False))
+
+
+    #   TRANSCODERS
+    tc_states = torch.load('/media/andrelongon/DATA/tc_ckpts/group_scale1_1.5_1024batch_4exp/vanilla_4exp_gtc_weights_50ep.pth')
+    w_enc = torch.transpose(tc_states['W_enc'].cpu(), 0, 1)
+    # w_dec = tc_states['W_dec'].cpu()
+    w_dec_same = tc_states['W_dec'][:, :256].cpu()
+    w_dec_zoom = tc_states['W_dec'][:, 256:].cpu()
+
+    w_enc = torch.nn.functional.normalize(w_enc)
+    # w_dec = torch.nn.functional.normalize(w_dec)
+    w_dec_same = torch.nn.functional.normalize(w_dec_same)
+    w_dec_zoom = torch.nn.functional.normalize(w_dec_zoom)
+
+    all_mags = []
+    all_chunk_sims = []
     all_sims = []
-    for latent in w_dec:
-        latent = torch.nn.functional.normalize(latent)
+    for i in range(w_enc.shape[0]):
+        #   TODO (for group transcoder):  weight dot by first chunk's weight mag.
+        #   Or just store in separate list and print alongside top 32 cosines to pick and choose those that have relatively
+        #   low ones.
+        #   NOTE:  as bn2 admits negative acts into the res stream summation, should I only consider mag of positive weights?
+        #   I could also try to subtract enc direction from the dec weights, then take residual mag?
+        #   Since input and post-sum stream is relu'd, I should only consider the dims that directly positively interfere.
 
-        # all_sims.append(torch.dot(latent[0], latent[-1]))
-        sims = []
-        for i in range(latent.shape[0]):
-            for j in range(i, latent.shape[0]):
-                sims.append(torch.dot(latent[i], latent[j]))
+        # all_mags.append(torch.norm(torch.clamp(w_dec_same[i], min=0, max=None)))
+        all_chunk_sims.append(torch.abs(torch.dot(w_dec_same[i], w_dec_zoom[i])))
+        all_sims.append(torch.dot(w_enc[i], w_dec_zoom[i]))
 
-        all_sims.append(torch.tensor(sims).mean())
-
-    print(torch.topk(torch.tensor(all_sims), 32, largest=True))
+    all_mags = np.array(all_mags)
+    all_chunk_sims = np.array(all_chunk_sims)
+    # print(f'MAG MEAN: {all_mags.mean()}')
+    print(f'CHUNK SIM MEAN: {all_chunk_sims.mean()}')
+    top_vals, top_idx = torch.topk(torch.tensor(all_sims), 32, largest=True)
+    # print(all_mags[top_idx.tolist()])
+    print(all_chunk_sims[top_idx.tolist()])
+    print(top_vals, top_idx)
+    # print(torch.topk(torch.tensor(all_sims), 32, largest=False))

@@ -1,7 +1,6 @@
 from pathlib import Path
 import os
 import argparse
-from thingsvision import get_extractor
 from PIL import Image
 import numpy as np
 import torch
@@ -18,20 +17,28 @@ parser.add_argument('--basedir', type=str)
 parser.add_argument('--gcc', type=str)
 parser.add_argument('--module', type=str, default='0')
 parser.add_argument('--neuron', type=int)
+parser.add_argument('--chunk', type=int, default=-1)
 parser.add_argument('--device', type=int, default=0)
 parser.add_argument('--jitter', type=int, default=16)
 parser.add_argument('--direction', action='store_true', default=False)
 args = parser.parse_args()
 
-device_str = f"cuda:{args.device}" if torch.cuda.is_available() else "cpu"
-transform.device = torch.device(device_str)
-param.spatial.device = torch.device(device_str)
-param.color.device = torch.device(device_str)
+device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+transform.device = device
+param.spatial.device = device
+param.color.device = device
 
-model = models.resnet18(True).to(device_str)
-gcc_states = torch.load(f'/media/andrelongon/DATA/sae_ckpts/{args.gcc}/vanilla_64exp_8e-5L1_sae_weights_25ep.pth')
-layer_dirs = torch.transpose(gcc_states['W_enc'], 0, 1)
-# layer_dirs = gcc_states['W_dec'][:, :512]
+model = models.resnet18(True)
+gcc_states = torch.load(f'/media/andrelongon/DATA/tc_ckpts/{args.gcc}/vanilla_4exp_gtc_weights_50ep.pth')
+
+if 'bn2' in args.module:
+    # layer_dirs = torch.transpose(gcc_states['W_enc'], 0, 1)
+    layer_dirs = gcc_states['W_dec'][:, 256:]
+else:
+    layer_dirs = torch.transpose(gcc_states['W_enc'], 0, 1)
+    # layer_dirs = gcc_states['W_dec']
+
+layer_dirs = layer_dirs.to(device)
 if args.direction:
     print(f"DIRECTION FOR LATENT {args.neuron}")
     subdir = f'direction/{args.module}'
@@ -39,8 +46,10 @@ if args.direction:
 else:
     print(f"LATENT {args.neuron}")
     subdir = 'latent'
-    model = ModelWrapper(model, 64, device_str, use_gcc=True)
+    model = ModelWrapper(model, 32, device, use_gcc=True)
     states = model.state_dict()
+    if args.chunk != -1:
+        layer_dirs = torch.reshape(layer_dirs, (layer_dirs.shape[0], 2, 256))[:, args.chunk]
     states['map.weight'] = layer_dirs
     model.load_state_dict(states)
     model = nn.Sequential(model)
@@ -48,7 +57,7 @@ else:
 
 savedir = os.path.join(args.basedir, args.gcc, subdir, f"unit{args.neuron}")
 Path(savedir).mkdir(parents=True, exist_ok=True)
-model.to(device_str).eval()
+model.to(device).eval()
 
 augs = None
 if args.jitter < 4:
@@ -70,4 +79,4 @@ param_f = lambda: param.images.image(224, decorrelate=True)
 imgs = render.render_vis(model, obj, param_f=param_f, transforms=augs, thresholds=(2560,), show_image=False)
 
 img = Image.fromarray((imgs[0][0]*255).astype(np.uint8))
-img.save(os.path.join(savedir, f"0_64exp_distill_center.png"))
+img.save(os.path.join(savedir, f"0_distill_center.png"))
