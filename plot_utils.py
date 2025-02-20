@@ -118,6 +118,24 @@ def plot_weight_mags(bn_figs, conv_figs, plotdir):
     fig.write_image(f"{plotdir}/weight_mags_all.png", scale=2)
 
 
+def plot_scale_vars(scale_vars, scale_channels, plotdir):
+    nonscale_mask = np.ones(scale_vars.shape[0], dtype=bool)
+    nonscale_mask[scale_channels] = 0
+
+    plt.plot(np.where(nonscale_mask)[0], scale_vars[nonscale_mask], 'o', color='tab:purple', label='Failed')
+    plt.axhline(scale_vars[nonscale_mask].mean(), color='tab:purple')
+
+    plt.plot(np.where(nonscale_mask == False)[0], scale_vars[scale_channels], 'o', color='y', label='Passed')
+    plt.axhline(scale_vars[scale_channels].mean(), color='y')
+
+    plt.legend(loc='upper right')
+    plt.xlabel('Channel')
+    plt.ylabel('Variance from Scale Aug')
+    # plt.ylim(0, 1)
+
+    plt.show()
+
+
 def plot_scale_percs(scale_percs, no_mix_percs, plotdir):
     x_cats = ["1.1", "2.0", "2.1", "3.0", "3.1", "4.0", "4.1"]
     fig = go.Figure()
@@ -129,22 +147,19 @@ def plot_scale_percs(scale_percs, no_mix_percs, plotdir):
     fig.write_image(f"{plotdir}/scale_invariance_percs.png", scale=2)
 
 
-#   TODO:  Plot raw accs in one plot, plot scale abl acc / rand abl acc ratio in other plot.
-#          Maybe plot both blocks in one.
 def plot_scale_robust_accs(layer):
     if layer == 'layer2.1':
-        no_scale_scale = 67.576
-        up_scale_scale = [65.808, 64.286, 61.716, 57.74, 51.286]
+        no_scale_acc = 63.75
+        up_scale_accs = [61.394, 59.39, 56.222, 51.686, 44.292]
     elif layer == 'layer3.1':
-        no_scale_scale = 68.63
-        up_scale_scale = [67.374, 65.74, 63.178, 59.272, 52.934]
+        no_scale_acc = 63.493
+        up_scale_accs = [61.712, 60.194, 57.424, 53.358, 46.704]
 
-    no_scales = np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/no_scale_rand_mean_all_trials.npy')
-    no_scale_rand = no_scale_scale / np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/no_scale_rand_mean_all_trials.npy')
+    no_scale_rand = no_scale_acc / np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/no_scale_rand_mean_all_trials.npy')
     no_scale_rand_err = sem(no_scale_rand)
     no_scale_rand = np.mean(no_scale_rand)
 
-    up_scale_rand = np.array([up_scale_scale / np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/up_rand_mean_trial_{i}.npy') for i in range(10)])
+    up_scale_rand = np.array([up_scale_accs / np.load(f'/media/andrelongon/DATA/scale_robust_results/{layer}/up_rand_mean_trial_{i}.npy') for i in range(10)])
     up_scale_rand_err = sem(up_scale_rand, axis=0)
     up_scale_rand = np.mean(up_scale_rand, axis=0)
 
@@ -170,7 +185,7 @@ def plot_scale_robust_accs(layer):
     if layer == 'layer2.1':
         ax.set_ylim([0.9, 1.1])
     elif layer == 'layer3.1':
-        ax.set_ylim([0.99, 1.01])
+        ax.set_ylim([0.9, 1.1])
     plt.show()
 
 

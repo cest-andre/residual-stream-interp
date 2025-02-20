@@ -73,7 +73,7 @@ def validate(model, valdir, batch_size=1024, k=1, scale=1, fill=0, lesions=None,
     elif scale > 1:
         transform = transforms.Compose([
             transforms.Resize(256),
-            transforms.CenterCrop(int(IMAGE_SIZE*(scale-1))),
+            transforms.CenterCrop(int(IMAGE_SIZE*(2-scale))),
             transforms.Resize(IMAGE_SIZE),
             transforms.ToTensor(),
         ])

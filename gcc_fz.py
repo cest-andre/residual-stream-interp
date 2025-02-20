@@ -29,7 +29,7 @@ param.spatial.device = device
 param.color.device = device
 
 model = models.resnet18(True)
-gcc_states = torch.load(f'/media/andrelongon/DATA/tc_ckpts/{args.gcc}/vanilla_4exp_gtc_weights_50ep.pth')
+gcc_states = torch.load(f'/media/andrelongon/DATA/tc_ckpts/{args.gcc}/vanilla_8exp_gtc_weights_25ep.pth')
 
 if 'bn2' in args.module:
     # layer_dirs = torch.transpose(gcc_states['W_enc'], 0, 1)

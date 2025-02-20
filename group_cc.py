@@ -216,7 +216,7 @@ if __name__ == "__main__":
 
 
     #   TRANSCODERS
-    tc_states = torch.load('/media/andrelongon/DATA/tc_ckpts/group_scale1_1.5_1024batch_4exp/vanilla_4exp_gtc_weights_50ep.pth')
+    tc_states = torch.load('/media/andrelongon/DATA/tc_ckpts/group_scale1_1.5_1024batch_8exp/vanilla_8exp_gtc_weights_25ep.pth')
     w_enc = torch.transpose(tc_states['W_enc'].cpu(), 0, 1)
     # w_dec = tc_states['W_dec'].cpu()
     w_dec_same = tc_states['W_dec'][:, :256].cpu()
@@ -238,16 +238,16 @@ if __name__ == "__main__":
         #   I could also try to subtract enc direction from the dec weights, then take residual mag?
         #   Since input and post-sum stream is relu'd, I should only consider the dims that directly positively interfere.
 
-        # all_mags.append(torch.norm(torch.clamp(w_dec_same[i], min=0, max=None)))
+        all_mags.append(torch.norm(torch.clamp(w_dec_same[i], min=0, max=None)))
         all_chunk_sims.append(torch.abs(torch.dot(w_dec_same[i], w_dec_zoom[i])))
-        all_sims.append(torch.dot(w_enc[i], w_dec_zoom[i]))
+        all_sims.append(torch.abs(torch.dot(w_enc[i], w_dec_zoom[i])))
 
     all_mags = np.array(all_mags)
-    all_chunk_sims = np.array(all_chunk_sims)
-    # print(f'MAG MEAN: {all_mags.mean()}')
-    print(f'CHUNK SIM MEAN: {all_chunk_sims.mean()}')
-    top_vals, top_idx = torch.topk(torch.tensor(all_sims), 32, largest=True)
-    # print(all_mags[top_idx.tolist()])
-    print(all_chunk_sims[top_idx.tolist()])
+    # all_chunk_sims = np.array(all_chunk_sims)
+    print(f'MAG MEAN: {all_mags.mean()}')
+    # print(f'CHUNK SIM MEAN: {all_chunk_sims.mean()}')
+    top_vals, top_idx = torch.topk(torch.tensor(all_sims), 32, largest=False)
+    print(all_mags[top_idx.tolist()])
+    # print(all_chunk_sims[top_idx.tolist()])
     print(top_vals, top_idx)
     # print(torch.topk(torch.tensor(all_sims), 32, largest=False))

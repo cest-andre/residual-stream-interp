@@ -1,18 +1,22 @@
 import os
 import argparse
+import math
 import torch
-from torchvision import transforms
-from thingsvision import get_extractor
+from torch import nn
+from torchvision import models, transforms
+from thingsvision import get_extractor, get_extractor_from_model
 from PIL import Image
 import numpy as np
 from scipy.stats import spearmanr
 import plotly.express as px
 from plotly.subplots import make_subplots
 
+from group_cc import ModelWrapper
 from feature_grid import residual_grid, exemplar_grid
-from plot_utils import plot_mix_histos, plot_bn_acts_corrs, plot_weight_mags, plot_scale_percs
+from plot_utils import plot_mix_histos, plot_bn_acts_corrs, plot_weight_mags, plot_scale_percs, plot_scale_vars
 
 
+IMAGE_SIZE = 224
 MEAN = [0.485, 0.456, 0.406]
 STD = [0.229, 0.224, 0.225]
 norm_trans = transforms.Compose([
@@ -22,13 +26,13 @@ norm_trans = transforms.Compose([
 
 block_list = [
     # {
-    #     'output_module': 'layer1.1',
-    #     'input_module': 'layer1.0',
+    #     'output_module': 'layer1.1.prerelu_out',
+    #     'input_module': 'layer1.0.prerelu_out',
     #     'middle_module': 'layer1.1.bn2',
     #     'num_neurons': 64
     # },
     # {
-    #     'output_module': 'layer2.0',
+    #     'output_module': 'layer2.0.prerelu_out',
     #     'input_module': 'layer2.0.downsample.1',
     #     'middle_module': 'layer2.0.bn2',
     #     'num_neurons': 128
@@ -40,7 +44,7 @@ block_list = [
     #     'num_neurons': 128
     # },
     # {
-    #     'output_module': 'layer3.0',
+    #     'output_module': 'layer3.0.prerelu_out',
     #     'input_module': 'layer3.0.downsample.1',
     #     'middle_module': 'layer3.0.bn2',
     #     'num_neurons': 256
@@ -52,14 +56,14 @@ block_list = [
         'num_neurons': 256
     },
     # {
-    #     'output_module': 'layer4.0',
+    #     'output_module': 'layer4.0.prerelu_out',
     #     'input_module': 'layer4.0.downsample.1',
     #     'middle_module': 'layer4.0.bn2',
     #     'num_neurons': 512
     # },
     # {
-    #     'output_module': 'layer4.1',
-    #     'input_module': 'layer4.0',
+    #     'output_module': 'layer4.1.prerelu_out',
+    #     'input_module': 'layer4.0.prerelu_out',
     #     'middle_module': 'layer4.1.bn2',
     #     'num_neurons': 512
     # }
@@ -90,11 +94,63 @@ def get_activations(extractor, x, module_name, neuron_coord=None, channel_id=Non
     return activations
 
 
-def measure_invariance(extractor, fzdir, curvedir, model_name, output_module, input_module, middle_module, neuron, variant="scale", imnet_val=False, show_results=False):
+def measure_scale_inv(extractor, fzdir, curvedir, model_name, input_module, output_module, neuron, imnet_val=False):
+    top_img = None
+    if False:
+        img_path = os.path.join(curvedir, model_name, output_module, f"{output_module}_neuron{neuron}")
+        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file and "bottom" not in file]
+        top_out_img = torch.stack(top_img)
+    else:
+        top_in_img = Image.open(os.path.join(fzdir, model_name, input_module, f"unit{neuron}", "0_distill_center.png"))
+        top_in_img = norm_trans(top_in_img)
+
+        top_out_img = Image.open(os.path.join(fzdir, model_name, output_module, f"unit{neuron}", "0_distill_center.png"))
+        top_out_img = norm_trans(top_out_img)
+
+    center_acts = []
+    no_scale_act = None
+    for scale in np.arange(1, 1.55, 0.05):
+        scale = np.round(scale, 2)
+        scale_trans = None
+        if scale == 1:
+            scale_trans = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(IMAGE_SIZE),
+            ])
+            # no_scale_act = get_activations(extractor, scale_trans(top_out_img), output_module, channel_id=neuron, use_center=True)
+
+            center_acts.append(get_activations(extractor, scale_trans(top_out_img), output_module, channel_id=neuron, use_center=True))
+            continue
+        elif scale > 1:
+            scale_trans = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(int(IMAGE_SIZE*(2-scale))),
+                transforms.Resize(IMAGE_SIZE),
+            ])
+        elif scale < 1:
+            resize = int(IMAGE_SIZE*scale) if int(IMAGE_SIZE*scale) % 2 == 0 else math.ceil(IMAGE_SIZE*scale)
+            scale_trans = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(IMAGE_SIZE),
+                transforms.Resize(resize),
+                transforms.Pad(int((IMAGE_SIZE - resize) / 2), padding_mode='constant', fill=127),
+            ])
+
+        center_acts.append(get_activations(extractor, scale_trans(top_out_img), output_module, channel_id=neuron, use_center=True))
+
+    center_acts = np.array(center_acts)
+    center_acts = np.clip(center_acts, a_min=0, a_max=None)
+    center_acts = center_acts / np.max(center_acts)
+    # scale_vars = np.var(center_acts, axis=0)
+    
+    return center_acts, np.mean(center_acts)
+
+
+def invariance_delta(extractor, fzdir, curvedir, model_name, output_module, input_module, middle_module, neuron, variant="scale", imnet_val=False, show_results=False):
     top_img = None
     if imnet_val:
-        img_path = os.path.join(curvedir, model_name, input_module, "intact", f"{input_module}_neuron{neuron}", "max", "exc")
-        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file]
+        img_path = os.path.join(curvedir, model_name, input_module, f"{input_module}_neuron{neuron}")
+        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file and "bottom" not in file]
         top_img = torch.stack(top_img)
     else:
         top_img = Image.open(os.path.join(fzdir, model_name, input_module, f"unit{neuron}", "0_distill_center.png"))
@@ -103,8 +159,8 @@ def measure_invariance(extractor, fzdir, curvedir, model_name, output_module, in
     variant_trans = None
     if variant == "scale":
         variant_trans = transforms.Compose([
-            transforms.CenterCrop(112),
-            transforms.Resize(224)
+            transforms.CenterCrop(IMAGE_SIZE/2),
+            transforms.Resize(IMAGE_SIZE)
         ])
     elif variant == "flip":
         variant_trans = transforms.RandomHorizontalFlip(p=1)
@@ -115,8 +171,8 @@ def measure_invariance(extractor, fzdir, curvedir, model_name, output_module, in
     mid_act_delta = np.mean(np.clip(mid_variant_act, 0, None)) - np.mean(np.clip(mid_base_act, 0, None))
 
     if imnet_val:
-        img_path = os.path.join(curvedir, model_name, middle_module, "intact", f"{middle_module}_neuron{neuron}", "max", "exc")
-        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file]
+        img_path = os.path.join(curvedir, model_name, middle_module, f"{middle_module}_neuron{neuron}")
+        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file and "bottom" not in file]
         top_img = torch.stack(top_img)
     else:
         top_img = Image.open(os.path.join(fzdir, model_name, middle_module, f"unit{neuron}", "0_distill_center.png"))
@@ -144,8 +200,8 @@ def measure_invariance(extractor, fzdir, curvedir, model_name, output_module, in
 def stream_inspect(extractor, fzdir, curvedir, model_name, output_module, input_module, middle_module, neuron, imnet_val=False, show_results=False):
     top_img = None
     if imnet_val:
-        img_path = os.path.join(curvedir, model_name, output_module, "intact", f"{output_module}_neuron{neuron}", "max", "exc")
-        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file]
+        img_path = os.path.join(curvedir, model_name, output_module, f"{output_module}_neuron{neuron}")
+        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file and "bottom" not in file]
         top_img = torch.stack(top_img)
     else:
         top_img = Image.open(os.path.join(fzdir, model_name, output_module, f"unit{neuron}", "0_distill_center.png"))
@@ -156,8 +212,8 @@ def stream_inspect(extractor, fzdir, curvedir, model_name, output_module, input_
     out_mid_acts = get_activations(extractor, top_img, middle_module, channel_id=neuron, use_center=True)
 
     if imnet_val:
-        img_path = os.path.join(curvedir, model_name, input_module, "intact", f"{input_module}_neuron{neuron}", "max", "exc")
-        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file]
+        img_path = os.path.join(curvedir, model_name, input_module, f"{input_module}_neuron{neuron}")
+        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file and "bottom" not in file]
         top_img = torch.stack(top_img)
     else:
         top_img = Image.open(os.path.join(fzdir, model_name, input_module, f"unit{neuron}", "0_distill_center.png"))
@@ -168,8 +224,8 @@ def stream_inspect(extractor, fzdir, curvedir, model_name, output_module, input_
     in_mid_acts = get_activations(extractor, top_img, middle_module, channel_id=neuron, use_center=True)
 
     if imnet_val:
-        img_path = os.path.join(curvedir, model_name, middle_module, "intact", f"{middle_module}_neuron{neuron}", "max", "exc")
-        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file]
+        img_path = os.path.join(curvedir, model_name, middle_module, f"{middle_module}_neuron{neuron}")
+        top_img = [norm_trans(Image.open(os.path.join(img_path, file))) for file in os.listdir(img_path) if ".png" in file and "bottom" not in file]
         top_img = torch.stack(top_img)
     else:
         top_img = Image.open(os.path.join(fzdir, model_name, middle_module, f"unit{neuron}", "0_distill_center.png"))
@@ -223,6 +279,7 @@ def stream_inspect(extractor, fzdir, curvedir, model_name, output_module, input_
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--network', type=str)
+    parser.add_argument('--use_sae', action='store_true', default=False)
     parser.add_argument('--fzdir', type=str)
     parser.add_argument('--curvedir', type=str)
     parser.add_argument('--plotdir', type=str)
@@ -235,12 +292,31 @@ if __name__ == "__main__":
     plotdir = args.plotdir
     run_mode = args.run_mode
 
-    extractor = get_extractor(
-        model_name=network,
-        source='torchvision',
-        device="cuda" if torch.cuda.is_available() else "cpu",
-        pretrained=True
-    )
+    device = f"cuda:1" if torch.cuda.is_available() else "cpu"
+
+    if args.use_sae:
+        model = models.resnet18(True)
+        gcc_states = torch.load(f'/media/andrelongon/DATA/tc_ckpts/group_scale1_1.5_1024batch_8exp/vanilla_8exp_gtc_weights_25ep.pth')
+        layer_dirs = gcc_states['W_dec'][:, 256:]
+
+        model = ModelWrapper(model, 8, device, use_gcc=True)
+        states = model.state_dict()
+        states['map.weight'] = layer_dirs
+        model.load_state_dict(states)
+        model = nn.Sequential(model)
+
+        extractor = get_extractor_from_model(
+            model=model,
+            device=device,
+            backend='pt'
+        )
+    else:
+        extractor = get_extractor(
+            model_name=network,
+            source='torchvision',
+            device=device,
+            pretrained=True
+        )
 
     if run_mode == "spectrum":
         top_mixes = []
@@ -338,6 +414,8 @@ if __name__ == "__main__":
             scale_mid_measures = []
             scale_in_measures = []           
             mixes = []
+            scale_vars = []
+            scale_acts = []
             imnet_val = False
             show_results = False
             for n in range(block['num_neurons']):
@@ -345,7 +423,7 @@ if __name__ == "__main__":
 
                 assert acts['mid_out_acts'] >= 0 or acts['in_out_acts'] >= 0, f"Neither mix component is above 0.  Rerun FZ on neuron {n}."
 
-                mid_act_delta, in_act_delta = measure_invariance(extractor, fzdir, curvedir, network, block['output_module'], block['input_module'], block['middle_module'], n, imnet_val=imnet_val, show_results=show_results)
+                mid_act_delta, in_act_delta = invariance_delta(extractor, fzdir, curvedir, network, block['output_module'], block['input_module'], block['middle_module'], n, imnet_val=imnet_val, show_results=show_results)
                 #   NOTE:  store deltas as a perc of max activation to control for different act ranges in the two modules.
                 scale_mid_measures.append(mid_act_delta / acts['mid_mid_acts'])
                 scale_in_measures.append(in_act_delta / acts['in_in_acts'])
@@ -360,47 +438,38 @@ if __name__ == "__main__":
 
                 mixes.append(converted_mix)
 
-            mixes = torch.tensor(mixes)
+                scale_act, scale_var = measure_scale_inv(extractor, fzdir, curvedir, network, block['input_module'], block['output_module'], n, imnet_val=imnet_val)
+                scale_acts.append(scale_act)
+                scale_vars.append(scale_var)
 
+            mixes = torch.tensor(mixes)
             scale_mid_measures = torch.tensor(scale_mid_measures)
             scale_in_measures = torch.tensor(scale_in_measures)
+            scale_vars = torch.tensor(scale_vars)
+            scale_acts = torch.tensor(scale_acts)
 
             factor = 1.5
             scale_mid_copy = torch.clone(scale_mid_measures)
             scale_in_copy = torch.clone(scale_in_measures)
             scale_mid_copy[torch.nonzero(torch.logical_or(scale_mid_copy <= 0, torch.logical_or(mixes <= (1/factor), mixes >= factor)))] = -1e10
             scale_in_copy[torch.nonzero(torch.logical_or(scale_in_copy <= 0, torch.logical_or(mixes <= (1/factor), mixes >= factor)))] = -1e10
-            scale_top_cross_delta = scale_mid_copy + scale_in_copy
-            top_scales, top_scale_channels = torch.topk(scale_top_cross_delta, torch.nonzero((scale_mid_copy + scale_in_copy) > 0).shape[0])
+            scale_top_cross_delta = scale_mid_copy# + scale_in_copy
+            top_scales, top_scale_channels = torch.topk(scale_top_cross_delta, torch.nonzero((scale_top_cross_delta) > 0).shape[0])
             scale_percs.append(top_scales.shape[0] / block['num_neurons'])
-
-            #   No mix criterion.
-            scale_mid_copy = torch.clone(scale_mid_measures)
-            scale_in_copy = torch.clone(scale_in_measures)
-            scale_mid_copy[torch.nonzero(scale_mid_copy <= 0)] = -1e10
-            scale_in_copy[torch.nonzero(scale_in_copy <= 0)] = -1e10
-            scale_top_cross_delta = scale_mid_copy + scale_in_copy
-            no_mix_top_scales, no_mix_top_scale_channels = torch.topk(scale_top_cross_delta, torch.nonzero((scale_mid_copy + scale_in_copy) > 0).shape[0])
-            no_mix_percs.append(no_mix_top_scales.shape[0] / block['num_neurons'])
-
-            #   Extract top 3 channels for visualization.
-            # if top_scales.shape[0] > 3:
-                # top_scale_channels = top_scale_channels[torch.topk(top_scales, 3)[1]]
 
             scale_mixes.append({f"scale mix {block['output_module']}": mixes[top_scale_channels]})
             in_deltas.append({f"in deltas {block['output_module']}": scale_in_measures[top_scale_channels]})
             mid_deltas.append({f"mid deltas {block['output_module']}": scale_mid_measures[top_scale_channels]})
             chans.append({f"all channels {block['output_module']}": top_scale_channels})
 
-            # continue
-
-            for c in top_scale_channels:
-                exemplar_grid(fzdir, network, block['input_module'], block['middle_module'], block['output_module'], c, fzdir, val_dir=curvedir)
+            # for c in top_scale_channels:
+                # exemplar_grid(fzdir, network, block['input_module'], block['middle_module'], block['output_module'], c, fzdir, val_dir=curvedir)
                 # scale_grid = residual_grid(fzdir, network, block['input_module'], block['middle_module'], block['output_module'], top_scale_channels)
                 # scale_grid.show()
 
         print(chans)
+        print(scale_percs)
+
         print(scale_mixes)
         print(in_deltas)
         print(mid_deltas)
-        # plot_scale_percs(torch.tensor(scale_percs), torch.tensor(no_mix_percs), plotdir)

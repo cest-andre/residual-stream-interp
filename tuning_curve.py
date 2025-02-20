@@ -3,11 +3,13 @@ from pathlib import Path
 import copy
 import argparse
 import torch
+from torch import nn
 import torchvision
 from torchvision import models, transforms, utils
 import numpy as np
 from thingsvision import get_extractor, get_extractor_from_model
 
+from group_cc import ModelWrapper
 from imnet_val import get_imnet_val_acts
 from stream_inspect import get_activations
 
@@ -49,7 +51,6 @@ def saveTopN(imgs, lista, neuron_id, n=9, path="", save_inh=False):
 
 
 def compare_tuning_curves(extractor, module_name, savedir, valdir):
-
     all_images, act_list, unrolled_acts, all_act_list, all_ord_sorted, _ = \
         get_imnet_val_acts(extractor, module_name, valdir, sort_acts=False)
 
@@ -82,19 +83,12 @@ if __name__ == '__main__':
 
     savedir = os.path.join(args.savedir, args.network, args.layer)
     Path(savedir).mkdir(parents=True, exist_ok=True)
-
-    model = models.resnet18(True, lesion=False).cuda()
-    extractor = get_extractor_from_model(
-        model=model,
-        device='cuda',
-        backend='pt'
-    )
     
-    # extractor = get_extractor(
-    #     model_name=args.network,
-    #     source='torchvision',
-    #     device="cuda" if torch.cuda.is_available() else "cpu",
-    #     pretrained=True
-    # )
+    extractor = get_extractor(
+        model_name=args.network,
+        source='torchvision',
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        pretrained=True
+    )
 
     compare_tuning_curves(extractor, args.layer, savedir, args.imnet_val_dir)
