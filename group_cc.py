@@ -64,8 +64,16 @@ class L1Scheduler:
             setattr(self, k, state_dict[k])
 
 
+def LN(x: torch.Tensor, eps: float = 1e-5) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    mu = x.mean(dim=-1, keepdim=True)
+    x = x - mu
+    std = x.std(dim=-1, keepdim=True)
+    x = x / (std + eps)
+    return x, mu, std
+
+
 class GCC(nn.Module):
-    def __init__(self, input_dims, num_blocks, expansion=32, dtype=torch.float64, device="cuda", jumprelu=False, squeeze=10):
+    def __init__(self, input_dims, num_blocks, expansion=32, dtype=torch.float64, device="cuda", topk=None, auxk=None, dead_steps_threshold=None, jumprelu=False, squeeze=10):
         super().__init__()
 
         self.input_dims = input_dims
@@ -75,8 +83,21 @@ class GCC(nn.Module):
         self.device = device
         self.squeeze = squeeze
         self.jumprelu = jumprelu
+        self.topk = topk
 
         self.init_weights()
+
+        self.auxk = auxk
+        self.dead_steps_threshold = dead_steps_threshold
+
+        def auxk_mask_fn(x):
+            dead_mask = self.stats_last_nonzero > self.dead_steps_threshold
+            x.data *= dead_mask
+            return x
+
+        self.auxk_mask_fn = auxk_mask_fn
+        # self.stats_last_nonzero = None
+        self.register_buffer("stats_last_nonzero", torch.zeros(self.gcc_dims, dtype=torch.long))
 
     def init_weights(self):
         self.b_enc = nn.Parameter(
@@ -109,25 +130,56 @@ class GCC(nn.Module):
             )
 
     def encode(self, x):
-        x = nn.ReLU()(x @ self.W_enc + self.b_enc)
+        preact_feats = x @ self.W_enc + self.b_enc
+        top_dead_acts = None
+        num_dead = 0
 
         if self.jumprelu:
+            x = nn.ReLU()(preact_feats)
             x = x * self.squeeze_sigmoid(x - self.threshold)
+        elif self.topk is not None:
+            topk_res = torch.topk(preact_feats, k=self.topk, dim=-1)
+            values = nn.ReLU()(topk_res.values)
+            x = torch.zeros_like(preact_feats)
+            x.scatter_(-1, topk_res.indices, values)
 
-        return nn.ReLU()(x)
+            self.stats_last_nonzero *= (x == 0).all(dim=0).long()
+            self.stats_last_nonzero += 1
+
+            auxk_acts = self.auxk_mask_fn(preact_feats)
+            #   TODO: ensure all batch entries have at least auxk nonzero (dead) acts.
+            #   On second thought, do I even need to check this?  As there are so many latents,
+            #   and only k can fire each batch, perhaps it's fairly likely that at least 512
+            #   do not fire for the first epoch.
+            # if (torch.sum(auxk_acts != 0, dim=-1) >= self.auxk).all(dim=0):
+            num_dead = torch.mean(torch.sum(auxk_acts != 0, dim=-1).type(torch.float))
+            deadk_res = torch.topk(auxk_acts, k=self.auxk, dim=-1)
+            top_dead_acts = torch.zeros_like(auxk_acts)
+            top_dead_acts.scatter_(-1, deadk_res.indices, deadk_res.values)
+            top_dead_acts = nn.ReLU()(top_dead_acts)
+
+        return nn.ReLU()(x), top_dead_acts, num_dead
 
     def squeeze_sigmoid(self, x):
         # return 1 / (1+torch.exp(-self.squeeze*x))
         return (1.01 / (1+torch.exp(-self.squeeze*x))) - 0.01
 
-    def decode(self, x):
-        return x @ self.W_dec + self.b_dec
+    def decode(self, x, mu, std):
+        x = x @ self.W_dec + self.b_dec
+        x = x * std + mu
+        return x
 
     def forward(self, x):
-        features = self.encode(x)
-        out = self.decode(features)
+        dead_acts_recon = None
+        x, mu, std = LN(x)
 
-        return features, out
+        features, top_dead_acts, num_dead = self.encode(x)
+        out = self.decode(features, mu, std)
+
+        if top_dead_acts is not None:
+            dead_acts_recon = self.decode(top_dead_acts, mu, std)
+
+        return features, out, dead_acts_recon, num_dead
 
 
 class ThresholdClipper(object):
@@ -148,36 +200,46 @@ class ModelWrapper(nn.Module):
         super().__init__()
         self.device = device
 
-        self.model = nn.Sequential()
-        self.model.append(resnet.conv1)
-        self.model.append(resnet.bn1)
-        self.model.append(resnet.relu)
-        self.model.append(resnet.maxpool)
-        self.model.append(resnet.layer1)
-        self.model.append(resnet.layer2)
-        self.model.append(resnet.layer3)
-        # self.model.append(resnet.layer3[0])
-        # self.model.append(resnet.layer3[1].conv1)
-        # self.model.append(resnet.layer3[1].bn1)
-        # self.model.append(resnet.layer3[1].relu)
-        # self.model.append(resnet.layer3[1].conv2)
-        # self.model.append(resnet.layer3[1].bn2)
+        self.block_input = nn.Sequential()
+        self.block_input.append(resnet.conv1)
+        self.block_input.append(resnet.bn1)
+        self.block_input.append(resnet.relu)
+        self.block_input.append(resnet.maxpool)
+        self.block_input.append(resnet.layer1)
+        self.block_input.append(resnet.layer2)
 
-        # self.model.append(resnet.layer4)
-        # self.model.append(resnet.layer4[0])
-        # self.model.append(resnet.layer4[1].conv1)
-        # self.model.append(resnet.layer4[1].bn1)
-        # self.model.append(resnet.layer4[1].relu)
-        # self.model.append(resnet.layer4[1].conv2)
-        # self.model.append(resnet.layer4[1].bn2)
+        self.block_input.append(resnet.layer3[:5])
+        self.block_output = nn.Sequential()
+        self.block_output.append(resnet.layer3[5].conv1)
+        self.block_output.append(resnet.layer3[5].bn1)
+        self.block_output.append(resnet.layer3[5].relu)
+        self.block_output.append(resnet.layer3[5].conv2)
+        self.block_output.append(resnet.layer3[5].bn2)
+        self.block_output.append(resnet.layer3[5].relu)
+        self.block_output.append(resnet.layer3[5].conv3)
+        self.block_output.append(resnet.layer3[5].bn3)
+
+        # self.block_input.append(resnet.layer3)
+        # self.block_input.append(resnet.layer4[0])
+        # self.block_input.append(resnet.layer4[1].conv1)
+        # self.block_input.append(resnet.layer4[1].bn1)
+        # self.block_input.append(resnet.layer4[1].relu)
+        # self.block_input.append(resnet.layer4[1].conv2)
+        # self.block_input.append(resnet.layer4[1].bn2)
 
         self.use_gcc = use_gcc
         if self.use_gcc:
-            self.map = nn.Linear(256, 256*expansion, bias=False)
+            self.map = nn.Linear(1024, 1024*expansion, bias=False)
 
     def forward(self, x):
         x = x.to(self.device)
-        x = self.model(x)       
+        x = self.block_input(x)
+
+        presum_out = self.block_output(x)
+        x = x + presum_out
+
+        x = nn.ReLU(inplace=True)(x)
+        # x, _, _ = LN(x)
 
         if self.use_gcc:
             center_coord = x.shape[-1] // 2

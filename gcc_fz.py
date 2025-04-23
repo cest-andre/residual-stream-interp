@@ -28,15 +28,16 @@ transform.device = device
 param.spatial.device = device
 param.color.device = device
 
-model = models.resnet18(True)
-gcc_states = torch.load(f'/media/andrelongon/DATA/tc_ckpts/{args.gcc}/vanilla_8exp_gtc_weights_25ep.pth')
+# model = models.resnet18(True)
+model = models.resnet50(weights='IMAGENET1K_V2')
+gcc_states = torch.load(f'/media/andrelongon/DATA/resnet_sae_exp/ckpts/layer3.5.prerelu_out/{args.gcc}.pth')
 
 if 'bn2' in args.module:
     # layer_dirs = torch.transpose(gcc_states['W_enc'], 0, 1)
-    layer_dirs = gcc_states['W_dec'][:, 256:]
+    layer_dirs = gcc_states['W_dec']#[:, 256:]
 else:
-    layer_dirs = torch.transpose(gcc_states['W_enc'], 0, 1)
-    # layer_dirs = gcc_states['W_dec']
+    # layer_dirs = torch.transpose(gcc_states['W_enc'], 0, 1)
+    layer_dirs = gcc_states['W_dec']
 
 layer_dirs = layer_dirs.to(device)
 if args.direction:
@@ -49,7 +50,7 @@ else:
     model = ModelWrapper(model, 32, device, use_gcc=True)
     states = model.state_dict()
     if args.chunk != -1:
-        layer_dirs = torch.reshape(layer_dirs, (layer_dirs.shape[0], 2, 256))[:, args.chunk]
+        layer_dirs = torch.reshape(layer_dirs, (layer_dirs.shape[0], 2, 512))[:, args.chunk]
     states['map.weight'] = layer_dirs
     model.load_state_dict(states)
     model = nn.Sequential(model)
@@ -79,4 +80,4 @@ param_f = lambda: param.images.image(224, decorrelate=True)
 imgs = render.render_vis(model, obj, param_f=param_f, transforms=augs, thresholds=(2560,), show_image=False)
 
 img = Image.fromarray((imgs[0][0]*255).astype(np.uint8))
-img.save(os.path.join(savedir, f"0_distill_center.png"))
+img.save(os.path.join(savedir, f"0_dec_distill_center.png"))

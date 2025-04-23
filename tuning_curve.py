@@ -51,7 +51,7 @@ def saveTopN(imgs, lista, neuron_id, n=9, path="", save_inh=False):
 
 
 def compare_tuning_curves(extractor, module_name, savedir, valdir):
-    all_images, act_list, unrolled_acts, all_act_list, all_ord_sorted, _ = \
+    all_images, _, unrolled_acts, _, _, _ = \
         get_imnet_val_acts(extractor, module_name, valdir, sort_acts=False)
 
     unrolled_acts = np.array(unrolled_acts)
@@ -88,7 +88,8 @@ if __name__ == '__main__':
         model_name=args.network,
         source='torchvision',
         device="cuda" if torch.cuda.is_available() else "cpu",
-        pretrained=True
+        pretrained=True,
+        model_parameters={'weights': 'IMAGENET1K_V2'}
     )
 
     compare_tuning_curves(extractor, args.layer, savedir, args.imnet_val_dir)
