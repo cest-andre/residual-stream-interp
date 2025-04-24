@@ -1,6 +1,6 @@
 # residual-stream-interp
 
-Codebase for paper:  [Interpreting the Residual Stream of ResNet18](https://arxiv.org/abs/2407.05340)
+Codebase for paper:  [Naturally Computed Scale Invariance in the Residual Stream of ResNet18](https://arxiv.org/abs/2504.16290)
 
 To get started, clone the repository and then create a conda environment from the environment.yml file:
 
@@ -15,4 +15,8 @@ conda env create -f environment.yml
 
 **tuning_curve.py** finds and saves the top-9 activating ImageNet validation images for every center unit in a specified layer.
 
-**stream_inspect.py** performs activation analyses to produce the skip-overwrite spectrum and measure scale invariance.  Use --run_mode argument values of  "spectrum" or "invariance" to select which analysis to perform.
+**stream_inspect.py** performs activation analyses to extract scale invariant channels.
+
+**scale_robust.py** implements the ablation experiments.
+
+GCC-related files and dict_tools contains experimental code pertaining to group crosscoders.  Work in progress.
